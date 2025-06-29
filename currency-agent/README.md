@@ -1,490 +1,487 @@
-# LangGraph Currency Agent with A2A Protocol
+# Currency Agent - A2A Protocol with LangGraph
 
-This sample demonstrates a currency conversion agent built with [LangGraph](https://langchain-ai.github.io/langgraph/) and exposed through the A2A protocol. It showcases conversational interactions with support for multi-turn dialogue and streaming responses.
+A currency exchange rate agent built with the A2A (Agent-to-Agent) protocol and LangGraph, following the **Practical A2A LangGraph Agent Project Structure v0.2.0** architecture.
 
-## How It Works
+## Table of Contents
 
-This agent uses LangGraph with LLM (for example Google Gemini..) to provide currency exchange information through a ReAct agent pattern. The A2A protocol enables standardized interaction with the agent, allowing clients to send requests and receive real-time updates.
+1. [Architecture Overview](#architecture-overview)
+2. [Detailed Structure](#detailed-structure)
+3. [Component Documentation](#component-documentation)
+4. [Data Flow](#data-flow)
+5. [Installation & Usage](#installation--usage)
+6. [Development Guidelines](#development-guidelines)
+
+## Architecture Overview
+
+This project implements the **v0.2.0 structure** from our best practices, which introduces an **adapters layer** for clean separation between the A2A protocol and LangGraph implementation. This version was chosen for its balance between modularity and complexity, making it ideal for production-ready agents.
+
+### Why v0.2.0?
+
+- **v0.1.0**: Basic modular structure but lacks protocol abstraction
+- **v0.2.0**: ✅ **Selected** - Adds adapters layer for clean protocol bridging
+- **v0.3.0**: Includes checkpointing (not needed for this simple agent)
+- **v0.4.0**: Fully modular with subsystems (overly complex for single agent)
+
+## Detailed Structure
+
+```
+currency-agent/
+├── src/
+│   └── currency_agent/
+│       ├── __init__.py
+│       │
+│       ├── core/                    # Core LangGraph Agent Logic
+│       │   ├── __init__.py
+│       │   ├── agent.py            # Main LangGraph agent implementation
+│       │   ├── state.py            # Agent state definitions (ResponseFormat)
+│       │   ├── tools.py            # Currency exchange rate tool
+│       │   └── prompts.py          # System and format instructions
+│       │
+│       ├── adapters/               # Protocol Adapters (A2A ↔ LangGraph)
+│       │   ├── __init__.py
+│       │   ├── a2a_executor.py    # Bridges A2A requests to LangGraph
+│       │   └── stream_converter.py # Converts LangGraph streams to A2A events
+│       │
+│       ├── server/                 # A2A Server Implementation
+│       │   ├── __init__.py
+│       │   ├── app.py             # Creates A2A Starlette application
+│       │   └── models.py          # Agent card and capability definitions
+│       │
+│       ├── client/                 # A2A Client Implementation
+│       │   ├── __init__.py
+│       │   └── test_client.py     # Example client for testing
+│       │
+│       ├── common/                 # Shared Utilities
+│       │   ├── __init__.py
+│       │   ├── config.py          # Configuration management
+│       │   ├── logging.py         # Logging setup
+│       │   └── exceptions.py      # Custom exception definitions
+│       │
+│       └── main.py                # Entry point with CLI interface
+│
+├── examples/                      # Usage examples
+│   └── run_server.py             # Example server startup script
+│
+├── tests/                        # Test directories (to be implemented)
+│   ├── unit/
+│   ├── integration/
+│   └── fixtures/
+│
+├── pyproject.toml               # Project configuration (uv)
+├── README.md                    # This file
+└── .env.example                # Environment variable template
+```
+
+## Component Documentation
+
+### Core Components (`core/`)
+
+#### `agent.py` - LangGraph Agent Implementation
+```python
+class CurrencyAgent:
+    """
+    Currency conversion agent using LangGraph.
+    
+    This agent specializes in currency exchange rate queries using
+    the ReAct pattern for tool usage and reasoning.
+    
+    Key features:
+    - Real-time exchange rate lookup via tools
+    - Structured response format
+    - Multi-turn conversation support
+    - Streaming response capability
+    """
+```
+
+- **Purpose**: Implements the main agent logic using LangGraph's ReAct pattern
+- **Key Methods**:
+  - `__init__()`: Initializes LLM, tools, and creates the ReAct graph
+  - `stream()`: Async generator that streams agent responses
+  - `get_agent_response()`: Processes final agent state into response format
+- **Dependencies**: LangChain, LangGraph, OpenAI/Google AI
+
+#### `tools.py` - Currency Exchange Tool
+```python
+@tool
+def get_exchange_rate(
+    currency_from: str = 'USD',
+    currency_to: str = 'EUR',
+    currency_date: str = 'latest',
+) -> Dict[str, Any]:
+```
+
+- **Purpose**: Provides real-time exchange rate data via Frankfurter API
+- **Features**: Error handling, input validation, JSON response parsing
+- **External API**: https://api.frankfurter.app/
+
+#### `state.py` - State Definitions
+```python
+class ResponseFormat(BaseModel):
+    status: Literal['input_required', 'completed', 'error']
+    message: str
+```
+
+- **Purpose**: Defines structured response format for consistent client parsing
+- **States**:
+  - `input_required`: Agent needs more information
+  - `completed`: Request successfully processed
+  - `error`: Error occurred during processing
+
+#### `prompts.py` - Agent Instructions
+- **SYSTEM_INSTRUCTION**: Defines agent's role and constraints
+- **FORMAT_INSTRUCTION**: Guides structured response generation
+
+### Adapter Components (`adapters/`)
+
+#### `a2a_executor.py` - A2A to LangGraph Bridge
+```python
+class CurrencyAgentExecutor(AgentExecutor):
+    """
+    A2A Protocol executor for the Currency Agent.
+    
+    This class bridges the A2A protocol with the LangGraph-based
+    CurrencyAgent, handling request execution and response formatting.
+    """
+```
+
+- **Purpose**: Implements A2A's AgentExecutor interface
+- **Responsibilities**:
+  - Validate incoming A2A requests
+  - Create/manage A2A tasks
+  - Delegate to CurrencyAgent
+  - Handle errors and exceptions
+- **Key Methods**:
+  - `execute()`: Main execution flow
+  - `_validate_request()`: Request validation
+  - `cancel()`: Task cancellation (not implemented)
+
+#### `stream_converter.py` - Stream Format Converter
+```python
+class StreamConverter:
+    """
+    Converts LangGraph streaming responses to A2A protocol events.
+    """
+```
+
+- **Purpose**: Translates between streaming formats
+- **Conversions**:
+  - LangGraph response items → A2A TaskYieldUpdate events
+  - Agent states → A2A TaskState enum
+  - Response content → A2A Message/Artifact format
+
+### Server Components (`server/`)
+
+#### `app.py` - A2A Server Application
+```python
+def create_app(host: str = 'localhost', port: int = 10000) -> A2AStarletteApplication:
+```
+
+- **Purpose**: Creates and configures the A2A server
+- **Components**:
+  - HTTP client for push notifications
+  - Request handler with executor
+  - In-memory task store
+  - Agent card configuration
+
+#### `models.py` - A2A Protocol Models
+```python
+def create_agent_card(host: str, port: int) -> AgentCard:
+```
+
+- **Purpose**: Defines agent metadata and capabilities
+- **Includes**:
+  - Agent name, description, version
+  - Supported input/output modes
+  - Capabilities (streaming, push notifications)
+  - Skills and examples
+
+### Common Components (`common/`)
+
+#### `config.py` - Configuration Management
+```python
+class Config:
+    """Configuration management for the Currency Agent."""
+```
+
+- **Purpose**: Centralized configuration from environment variables
+- **Managed Settings**:
+  - Model source (OpenAI, Google, etc.)
+  - Model name and temperature
+  - API keys
+- **Validation**: Ensures required configuration is present
+
+#### `logging.py` - Logging Setup
+- **Purpose**: Configures application-wide logging
+- **Features**: Log level control, format standardization
+
+#### `exceptions.py` - Custom Exceptions
+- **Hierarchy**:
+  - `CurrencyAgentError`: Base exception
+  - `ConfigurationError`: Configuration issues
+  - `MissingAPIKeyError`: Missing API keys
+  - `AgentExecutionError`: Runtime errors
+
+### Entry Point (`main.py`)
+
+```python
+@click.command()
+@click.option('--host', default='localhost')
+@click.option('--port', default=10000, type=int)
+@click.option('--log-level', default='INFO')
+def main(host: str, port: int, log_level: str) -> None:
+```
+
+- **Purpose**: CLI entry point for the server
+- **Features**:
+  - Command-line argument parsing
+  - Configuration validation
+  - Server initialization and startup
+  - Error handling and logging
+
+## Data Flow
+
+### 1. Request Flow
+```
+A2A Client → HTTP Request → A2A Server → RequestHandler → CurrencyAgentExecutor
+```
+
+### 2. Execution Flow
+```
+CurrencyAgentExecutor → CurrencyAgent → LangGraph ReAct → get_exchange_rate tool → Frankfurter API
+```
+
+### 3. Response Flow
+```
+Agent Response → StreamConverter → A2A Events → TaskUpdater → EventQueue → SSE Stream → A2A Client
+```
+
+### 4. Streaming Sequence
 
 ```mermaid
 sequenceDiagram
-    participant Client as A2A Client
-    participant Server as A2A Server
-    participant Agent as LangGraph Agent
-    participant API as Frankfurter API
+    participant Client
+    participant Server
+    participant Executor
+    participant StreamConverter
+    participant Agent
+    participant Tool
 
-    Client->>Server: Send task with currency query
-    Server->>Agent: Forward query to currency agent
-
-    alt Complete Information
-        Agent->>API: Call get_exchange_rate tool
-        API->>Agent: Return exchange rate data
-        Agent->>Server: Process data & return result
-        Server->>Client: Respond with currency information
-    else Incomplete Information
-        Agent->>Server: Request additional input
-        Server->>Client: Set state to "input-required"
-        Client->>Server: Send additional information
-        Server->>Agent: Forward additional info
-        Agent->>API: Call get_exchange_rate tool
-        API->>Agent: Return exchange rate data
-        Agent->>Server: Process data & return result
-        Server->>Client: Respond with currency information
+    Client->>Server: POST /tasks
+    Server->>Executor: execute(context, event_queue)
+    Executor->>Agent: stream(query, context_id)
+    
+    loop Streaming
+        Agent->>Tool: get_exchange_rate()
+        Tool-->>Agent: rate data
+        Agent->>StreamConverter: yield response item
+        StreamConverter->>Executor: convert to A2A event
+        Executor->>Server: TaskYieldUpdate
+        Server-->>Client: SSE event
     end
-
-    alt With Streaming
-        Note over Client,Server: Real-time status updates
-        Server->>Client: "Looking up exchange rates..."
-        Server->>Client: "Processing exchange rates..."
-        Server->>Client: Final result
-    end
+    
+    Agent->>StreamConverter: final response
+    StreamConverter->>Executor: completion event
+    Executor->>Server: Task completed
+    Server-->>Client: Final result
 ```
 
-## Key Features
+## Installation & Usage
 
-- **Multi-turn Conversations**: Agent can request additional information when needed
-- **Real-time Streaming**: Provides status updates during processing
-- **Push Notifications**: Support for webhook-based notifications
-- **Conversational Memory**: Maintains context across interactions
-- **Currency Exchange Tool**: Integrates with Frankfurter API for real-time rates
+### Prerequisites
 
-## Prerequisites
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
 
-- Python 3.12 or higher
-- [UV](https://docs.astral.sh/uv/)
-- Access to an LLM and API Key
+### Installation
 
-## Setup & Running
+```bash
+# Clone the repository
+git clone <repository-url>
+cd currency-agent
 
-1. Navigate to the samples directory:
-
-   ```bash
-   cd samples/python/agents/langgraph
-   ```
-
-2. Create an environment file with your API key:
-
-   ```bash
-   If you're using a Google Gemini model (gemini-pro, etc.):
-   echo "GOOGLE_API_KEY=your_api_key_here" > .env
-  
-   
-   If you're using OpenAI or any compatible API (e.g., local LLM via Ollama, LM Studio, etc.):
-
-   echo "API_KEY=your_api_key_here" > .env  (not neccessary if have no api key)
-   echo "TOOL_LLM_URL=your_llm_url" > .env
-   echo "TOOL_LLM_NAME=your_llm_name" > .env
-
-   ```
-
-3. Run the agent:
-
-   ```bash
-   # Basic run on default port 10000
-   uv run app
-
-   # On custom host/port
-   uv run app --host 0.0.0.0 --port 8080
-   ```
-
-4. In a separate terminal, run the test client:
-
-   ```bash
-   uv run app/test_client.py
-   ```
-
-## Build Container Image
-
-Agent can also be built using a container file.
-
-1. Navigate to the `samples/python/agents/langgraph` directory:
-
-  ```bash
-  cd samples/python/agents/langgraph
-  ```
-
-2. Build the container file
-
-    ```bash
-    podman build . -t langgraph-a2a-server
-    ```
-
-> [!Tip]  
-> Podman is a drop-in replacement for `docker` which can also be used in these commands.
-
-3. Run your container
-
-    ```bash
-    podman run -p 10000:10000 -e GOOGLE_API_KEY=your_api_key_here langgraph-a2a-server
-    ```
-
-4. Run A2A client (follow step 5 from the section above)
-
-> [!Important]
-> * **Access URL:** You must access the A2A client through the URL `0.0.0.0:10000`. Using `localhost` will not work.
-> * **Hostname Override:** If you're deploying to an environment where the hostname is defined differently outside the container, use the `HOST_OVERRIDE` environment variable to set the expected hostname on the Agent Card. This ensures proper communication with your client application.
-
-## Technical Implementation
-
-- **LangGraph ReAct Agent**: Uses the ReAct pattern for reasoning and tool usage
-- **Streaming Support**: Provides incremental updates during processing
-- **Checkpoint Memory**: Maintains conversation state between turns
-- **Push Notification System**: Webhook-based updates with JWK authentication
-- **A2A Protocol Integration**: Full compliance with A2A specifications
-
-## Limitations
-
-- Only supports text-based input/output (no multi-modal support)
-- Uses Frankfurter API which has limited currency options
-- Memory is session-based and not persisted between server restarts
-
-## Examples
-
-**Synchronous request**
-
-Request:
-
-```
-POST http://localhost:10000
-Content-Type: application/json
-
-{
-    "id": "12113c25-b752-473f-977e-c9ad33cf4f56",
-    "jsonrpc": "2.0",
-    "method": "message/send",
-    "params": {
-        "message": {
-            "kind": "message",
-            "messageId": "120ec73f93024993becf954d03a672bc",
-            "parts": [
-                {
-                    "kind": "text",
-                    "text": "how much is 10 USD in INR?"
-                }
-            ],
-            "role": "user"
-        }
-    }
-}
+# Install dependencies with uv
+uv sync
 ```
 
-Response:
+### Configuration
 
-```
-{
-    "id": "12113c25-b752-473f-977e-c9ad33cf4f56",
-    "jsonrpc": "2.0",
-    "result": {
-        "artifacts": [
-            {
-                "artifactId": "08373241-a745-4abe-a78b-9ca60882bcc6",
-                "name": "conversion_result",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "10 USD is 856.2 INR."
-                    }
-                ]
-            }
-        ],
-        "contextId": "e329f200-eaf4-4ae9-a8ef-a33cf9485367",
-        "history": [
-            {
-                "contextId": "e329f200-eaf4-4ae9-a8ef-a33cf9485367",
-                "kind": "message",
-                "messageId": "120ec73f93024993becf954d03a672bc",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "how much is 10 USD in INR?"
-                    }
-                ],
-                "role": "user",
-                "taskId": "58124b63-dd3b-46b8-bf1d-1cc1aefd1c8f"
-            },
-            {
-                "contextId": "e329f200-eaf4-4ae9-a8ef-a33cf9485367",
-                "kind": "message",
-                "messageId": "d8b4d7de-709f-40f7-ae0c-fd6ee398a2bf",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "Looking up the exchange rates..."
-                    }
-                ],
-                "role": "agent",
-                "taskId": "58124b63-dd3b-46b8-bf1d-1cc1aefd1c8f"
-            },
-            {
-                "contextId": "e329f200-eaf4-4ae9-a8ef-a33cf9485367",
-                "kind": "message",
-                "messageId": "ee0cb3b6-c3d6-4316-8d58-315c437a2a77",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "Processing the exchange rates.."
-                    }
-                ],
-                "role": "agent",
-                "taskId": "58124b63-dd3b-46b8-bf1d-1cc1aefd1c8f"
-            }
-        ],
-        "id": "58124b63-dd3b-46b8-bf1d-1cc1aefd1c8f",
-        "kind": "task",
-        "status": {
-            "state": "completed"
-        }
-    }
-}
+Create a `.env` file:
+
+```env
+# Model Configuration
+TOOL_MODEL_SRC=openai              # Model source: 'openai' or 'google'
+TOOL_MODEL_NAME=gpt-4o-mini        # Model name
+TOOL_MODEL_TEMPERATURE=0           # Temperature (0-1)
+
+# API Keys
+TOOL_API_KEY=your-api-key          # Your OpenAI/Google API key
 ```
 
-**Multi-turn example**
+### Running the Server
 
-Request - Seq 1:
+```bash
+# Using the CLI entry point
+uv run currency-agent --host localhost --port 10000
 
-```
-POST http://localhost:10000
-Content-Type: application/json
+# Or using Python module
+uv run python -m src.currency_agent.main
 
-{
-    "id": "27be771b-708f-43b8-8366-968966d07ec0",
-    "jsonrpc": "2.0",
-    "method": "message/send",
-    "params": {
-        "message": {
-            "kind": "message",
-            "messageId": "296eafc9233142bd98279e4055165f12",
-            "parts": [
-                {
-                    "kind": "text",
-                    "text": "How much is the exchange rate for 1 USD?"
-                }
-            ],
-            "role": "user"
-        }
-    }
-}
+# With custom options
+uv run currency-agent --host 0.0.0.0 --port 8080 --log-level DEBUG
 ```
 
-Response - Seq 2:
+### Testing the Agent
 
-```
-{
-    "id": "27be771b-708f-43b8-8366-968966d07ec0",
-    "jsonrpc": "2.0",
-    "result": {
-        "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-        "history": [
-            {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "296eafc9233142bd98279e4055165f12",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "How much is the exchange rate for 1 USD?"
-                    }
-                ],
-                "role": "user",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            }
-        ],
-        "id": "9d94c2d4-06e4-40e1-876b-22f5a2666e61",
-        "kind": "task",
-        "status": {
-            "message": {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "f0f5f3ff-335c-4e77-9b4a-01ff3908e7be",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "Please specify which currency you would like to convert to."
-                    }
-                ],
-                "role": "agent",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            },
-            "state": "input-required"
-        }
-    }
-}
+```bash
+# Run automated test examples
+uv run python src/currency_agent/client/test_client.py
+
+# Interactive mode
+uv run python src/currency_agent/client/test_client.py --interactive
+
+# Test specific URL
+uv run python src/currency_agent/client/test_client.py --url http://localhost:8080
 ```
 
-Request - Seq 3:
+### Example Queries
 
-```
-POST http://localhost:10000
-Content-Type: application/json
+1. **Simple Exchange Rate**:
+   - "What is the exchange rate from USD to EUR?"
+   - "Show me GBP to JPY rate"
 
-{
-    "id": "b88d818d-1192-42be-b4eb-3ee6b96a7e35",
-    "jsonrpc": "2.0",
-    "method": "message/send",
-    "params": {
-        "message": {
-            "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-            "kind": "message",
-            "messageId": "70371e1f231f4597b65ccdf534930ca9",
-            "parts": [
-                {
-                    "kind": "text",
-                    "text": "CAD"
-                }
-            ],
-            "role": "user",
-            "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-        }
-    }
-}
-```
+2. **Conversion Requests**:
+   - "Convert 100 USD to EUR"
+   - "How much is 50 GBP in CHF?"
 
-Response - Seq 4:
+3. **Historical Rates**:
+   - "USD to EUR rate on 2024-01-01"
+   - "Show me the exchange rate from USD to GBP for December 1st, 2023"
 
-```
-{
-    "id": "b88d818d-1192-42be-b4eb-3ee6b96a7e35",
-    "jsonrpc": "2.0",
-    "result": {
-        "artifacts": [
-            {
-                "artifactId": "08373241-a745-4abe-a78b-9ca60882bcc6",
-                "name": "conversion_result",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "The exchange rate for 1 USD to CAD is 1.3739."
-                    }
-                ]
-            }
-        ],
-        "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-        "history": [
-            {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "296eafc9233142bd98279e4055165f12",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "How much is the exchange rate for 1 USD?"
-                    }
-                ],
-                "role": "user",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            },
-            {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "f0f5f3ff-335c-4e77-9b4a-01ff3908e7be",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "Please specify which currency you would like to convert to."
-                    }
-                ],
-                "role": "agent",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            },
-            {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "70371e1f231f4597b65ccdf534930ca9",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "CAD"
-                    }
-                ],
-                "role": "user",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            },
-            {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "0eb4f200-a8cd-4d34-94f8-4d223eb1b2c0",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "Looking up the exchange rates..."
-                    }
-                ],
-                "role": "agent",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            },
-            {
-                "contextId": "a7cc0bef-17b5-41fc-9379-40b99f46a101",
-                "kind": "message",
-                "messageId": "41c7c03a-a772-4dc8-a868-e8c7b7defc91",
-                "parts": [
-                    {
-                        "kind": "text",
-                        "text": "Processing the exchange rates.."
-                    }
-                ],
-                "role": "agent",
-                "taskId": "9d94c2d4-06e4-40e1-876b-22f5a2666e61"
-            }
-        ],
-        "id": "9d94c2d4-06e4-40e1-876b-22f5a2666e61",
-        "kind": "task",
-        "status": {
-            "state": "completed"
-        }
-    }
-}
-```
+4. **Invalid Requests** (will be politely declined):
+   - "What's the weather today?"
+   - "Tell me a joke"
 
-**Streaming example**
+## Development Guidelines
 
-Request:
+### Adding New Tools
 
-```
-{
-    "id": "6d12d159-ec67-46e6-8d43-18480ce7f6ca",
-    "jsonrpc": "2.0",
-    "method": "message/stream",
-    "params": {
-        "message": {
-            "kind": "message",
-            "messageId": "2f9538ef0984471aa0d5179ce3c67a28",
-            "parts": [
-                {
-                    "kind": "text",
-                    "text": "how much is 10 USD in INR?"
-                }
-            ],
-            "role": "user"
-        }
-    }
-}
+1. Create tool function in `core/tools.py`
+2. Add `@tool` decorator from langchain_core
+3. Include in agent's tool list in `core/agent.py`
+4. Update prompts if needed
+
+### Extending the Agent
+
+1. **New State Types**: Add to `core/state.py`
+2. **New Prompts**: Update `core/prompts.py`
+3. **Protocol Changes**: Modify adapters in `adapters/`
+4. **Server Features**: Update `server/app.py`
+
+### Testing Strategy
+
+1. **Unit Tests** (`tests/unit/`):
+   - Test individual components
+   - Mock external dependencies
+   - Focus on business logic
+
+2. **Integration Tests** (`tests/integration/`):
+   - Test component interactions
+   - Use test fixtures
+   - Verify A2A protocol compliance
+
+3. **End-to-End Tests**:
+   - Use `client/test_client.py`
+   - Test full request/response cycle
+   - Verify streaming behavior
+
+### Code Style
+
+- Use type hints throughout
+- Add docstrings to all classes and functions
+- Follow PEP 8 guidelines
+- Keep functions focused and single-purpose
+
+### Error Handling
+
+1. Use custom exceptions from `common/exceptions.py`
+2. Log errors appropriately
+3. Return user-friendly error messages
+4. Maintain A2A protocol error standards
+
+## A2A Protocol Implementation
+
+### Supported Features
+
+- ✅ Task creation and management
+- ✅ Streaming responses (SSE)
+- ✅ Multi-turn conversations
+- ✅ Structured responses
+- ✅ Error handling
+- ✅ Agent discovery (/.well-known/agent.json)
+
+### Task States
+
+- `working`: Agent is processing
+- `input_required`: Needs user input
+- `completed`: Task finished successfully
+- `error`: Task failed
+
+### Message Types
+
+- User messages: Text input from clients
+- Agent messages: Progress updates
+- Artifacts: Final results
+
+## Future Enhancements
+
+1. **Checkpointing** (v0.3.0 features):
+   - Add persistence layer
+   - Implement state recovery
+   - Support long-running conversations
+
+2. **Additional Tools**:
+   - Historical rate analysis
+   - Currency trend predictions
+   - Multi-currency conversions
+
+3. **Protocol Extensions**:
+   - Batch processing
+   - Scheduled tasks
+   - Advanced streaming control
+
+## Troubleshooting
+
+### Common Issues
+
+1. **API Key Errors**:
+   - Ensure `.env` file exists
+   - Check `TOOL_API_KEY` is set
+   - Verify key permissions
+
+2. **Connection Errors**:
+   - Check Frankfurter API status
+   - Verify network connectivity
+   - Review firewall settings
+
+3. **Model Errors**:
+   - Confirm model name is correct
+   - Check API quotas
+   - Review rate limits
+
+### Debug Mode
+
+```bash
+# Enable debug logging
+uv run currency-agent --log-level DEBUG
+
+# Check server logs
+tail -f server.log
 ```
 
-Response:
+## License
 
-```
-data: {"id":"6d12d159-ec67-46e6-8d43-18480ce7f6ca","jsonrpc":"2.0","result":{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","history":[{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","kind":"message","messageId":"2f9538ef0984471aa0d5179ce3c67a28","parts":[{"kind":"text","text":"how much is 10 USD in INR?"}],"role":"user","taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"}],"id":"423a2569-f272-4d75-a4d1-cdc6682188e5","kind":"task","status":{"state":"submitted"}}}
+[Include license information]
 
-data: {"id":"6d12d159-ec67-46e6-8d43-18480ce7f6ca","jsonrpc":"2.0","result":{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","final":false,"kind":"status-update","status":{"message":{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","kind":"message","messageId":"1854a825-c64f-4f30-96f2-c8aa558b83f9","parts":[{"kind":"text","text":"Looking up the exchange rates..."}],"role":"agent","taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"},"state":"working"},"taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"}}
+## Contributing
 
-data: {"id":"6d12d159-ec67-46e6-8d43-18480ce7f6ca","jsonrpc":"2.0","result":{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","final":false,"kind":"status-update","status":{"message":{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","kind":"message","messageId":"e72127a6-4830-4320-bf23-235ac79b9a13","parts":[{"kind":"text","text":"Processing the exchange rates.."}],"role":"agent","taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"},"state":"working"},"taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"}}
-
-data: {"id":"6d12d159-ec67-46e6-8d43-18480ce7f6ca","jsonrpc":"2.0","result":{"artifact":{"artifactId":"08373241-a745-4abe-a78b-9ca60882bcc6","name":"conversion_result","parts":[{"kind":"text","text":"10 USD is 856.2 INR."}]},"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","kind":"artifact-update","taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"}}
-
-data: {"id":"6d12d159-ec67-46e6-8d43-18480ce7f6ca","jsonrpc":"2.0","result":{"contextId":"cd09e369-340a-4563-bca4-e5f2e0b9ff81","final":true,"kind":"status-update","status":{"state":"completed"},"taskId":"423a2569-f272-4d75-a4d1-cdc6682188e5"}}
-```
-
-## Learn More
-
-- [A2A Protocol Documentation](https://a2aproject.github.io/A2A/)
-- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
-- [Frankfurter API](https://www.frankfurter.app/docs/)
-- [Google Gemini API](https://ai.google.dev/gemini-api)
-
-
-## Disclaimer
-Important: The sample code provided is for demonstration purposes and illustrates the mechanics of the Agent-to-Agent (A2A) protocol. When building production applications, it is critical to treat any agent operating outside of your direct control as a potentially untrusted entity.
-
-All data received from an external agent—including but not limited to its AgentCard, messages, artifacts, and task statuses—should be handled as untrusted input. For example, a malicious agent could provide an AgentCard containing crafted data in its fields (e.g., description, name, skills.description). If this data is used without sanitization to construct prompts for a Large Language Model (LLM), it could expose your application to prompt injection attacks.  Failure to properly validate and sanitize this data before use can introduce security vulnerabilities into your application.
-
-Developers are responsible for implementing appropriate security measures, such as input validation and secure handling of credentials to protect their systems and users.
+[Include contribution guidelines]
