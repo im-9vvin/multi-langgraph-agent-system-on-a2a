@@ -4,3 +4,5 @@
 !.env.example*
 .venv/
 __pycache__/
+node_modules
+*.log
