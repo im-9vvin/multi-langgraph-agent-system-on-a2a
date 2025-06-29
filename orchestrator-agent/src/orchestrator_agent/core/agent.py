@@ -131,6 +131,8 @@ async def route_to_agents(state: OrchestratorState) -> OrchestratorState:
                 task["agent_url"] = config.agent_2_url
             elif task.get("agent_url") == "Currency Agent":
                 task["agent_url"] = config.agent_1_url
+            elif task.get("agent_url") == "Hotel Agent":
+                task["agent_url"] = config.agent_3_url
     except Exception as e:
         logger.error(f"Failed to parse routing response: {e}")
         # Get original user message
@@ -170,9 +172,9 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
     tasks = routing.get("tasks", [])
     
     if not tasks:
-        logger.error("No tasks in routing decision")
-        state["error"] = "No tasks to execute"
-        state["phase"] = "complete"
+        logger.info("No tasks to execute - likely a help/capability request")
+        state["remote_calls"] = []
+        state["phase"] = "aggregating"
         return state
     
     remote_calls = []
@@ -181,8 +183,9 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
     import httpx
     import asyncio
     
-    # Execute tasks (sequentially for now, can be parallelized)
-    for task in tasks:
+    # Create async task execution function
+    async def execute_single_task(task, config):
+        """Execute a single task and return the result."""
         agent_url = task.get("agent_url", config.agent_1_url)
         message = task.get("message", "")
         
@@ -205,11 +208,19 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
                 "id": 1
             }
             
+            # Prepare headers
+            headers = {"Content-Type": "application/json"}
+            
+            # Add API key header if this is Agent 3
+            if agent_url == config.agent_3_url and config.agent_3_api_key:
+                headers["X-API-Key"] = config.agent_3_api_key
+                logger.info(f"Adding API key for {agent_url}")
+            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     agent_url,
                     json=a2a_message,
-                    headers={"Content-Type": "application/json"}
+                    headers=headers
                 )
                 
                 if response.status_code == 200:
@@ -234,7 +245,7 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
                             poll_response = await client.post(
                                 agent_url,
                                 json=poll_data,
-                                headers={"Content-Type": "application/json"}
+                                headers=headers  # Use same headers with API key
                             )
                             
                             if poll_response.status_code == 200:
@@ -243,25 +254,26 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
                                 status = task_data.get("status", {}).get("state")
                                 
                                 if status == "completed":
-                                    # Extract result
+                                    # Extract result from artifacts array
                                     result_text = ""
                                     artifacts = task_data.get("artifacts", [])
                                     for artifact in artifacts:
                                         if "parts" in artifact:
                                             for part in artifact["parts"]:
-                                                if isinstance(part, dict) and "text" in part:
+                                                if isinstance(part, dict) and part.get("kind") == "text" and "text" in part:
                                                     result_text = part["text"]
                                                     break
+                                            if result_text:  # Break outer loop if we found text
+                                                break
                                     
                                     
-                                    remote_calls.append(RemoteAgentCall(
+                                    return RemoteAgentCall(
                                         agent_url=agent_url,
                                         task_id=task_id,
                                         status="completed",
                                         result=result_text,
                                         error=None
-                                    ))
-                                    break
+                                    )
                                 elif status == "failed":
                                     raise Exception("Task failed")
                         else:
@@ -273,13 +285,33 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
                     
         except Exception as e:
             logger.error(f"Failed to execute task on {agent_url}: {e}")
-            remote_calls.append(RemoteAgentCall(
+            return RemoteAgentCall(
                 agent_url=agent_url,
                 task_id="",
                 status="failed",
                 result=None,
                 error=str(e)
-            ))
+            )
+    
+    # Execute all tasks in parallel
+    parallel_tasks = []
+    for task in tasks:
+        # Check if this task should be parallel
+        if task.get("parallel", False):
+            parallel_tasks.append(task)
+        else:
+            # Execute non-parallel tasks immediately and wait
+            result = await execute_single_task(task, config)
+            remote_calls.append(result)
+    
+    # Execute parallel tasks concurrently
+    if parallel_tasks:
+        logger.info(f"Executing {len(parallel_tasks)} tasks in parallel")
+        results = await asyncio.gather(
+            *[execute_single_task(task, config) for task in parallel_tasks],
+            return_exceptions=False
+        )
+        remote_calls.extend(results)
     
     state["remote_calls"] = remote_calls
     state["phase"] = "aggregating"

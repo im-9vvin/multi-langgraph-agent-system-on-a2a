@@ -80,6 +80,7 @@ try:
                     
                     if poll_response.status_code == 200:
                         poll_result = poll_response.json()
+                        print(f"Poll result: {json.dumps(poll_result, indent=2)}")
                         task = poll_result.get("result", {})
                         status = task.get("status", {}).get("state", "unknown")
                         
