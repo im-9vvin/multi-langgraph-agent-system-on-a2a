@@ -10,10 +10,12 @@ According to the documentation provided, the A2A protocol explicitly supports th
 
 ### Key Evidence from the Documentation:
 
-1. **Combined Implementations Pattern**: 
+1. **Combined Implementations Pattern**:
+
    > "Combined Implementations merge client and server capabilities in a single agent, useful for agents that both provide services and coordinate with others. This pattern simplifies deployment for smaller systems while maintaining full protocol compliance. The agent can receive tasks as a server while delegating subtasks as a client."
 
 2. **Peer-to-Peer Capability**:
+
    > "Any A2A server can act as a client to other servers, enabling hierarchical task delegation"
 
 3. **Implementation Flexibility**:
@@ -22,10 +24,12 @@ According to the documentation provided, the A2A protocol explicitly supports th
 ### How It Works in Practice:
 
 An agent with a single codebase can:
+
 - **As a Server**: Expose HTTP endpoints to receive tasks from other agents
 - **As a Client**: Make HTTP requests to other A2A servers to delegate subtasks
 
 This dual-role capability enables powerful patterns like:
+
 - **Task Delegation Chains**: Agent A receives a task, processes part of it, then delegates subtasks to Agent B
 - **Hierarchical Processing**: Each agent in a chain can both receive and delegate tasks
 - **Dynamic Collaboration**: Agents can form ad-hoc networks where each participant can both provide and consume services
@@ -33,6 +37,7 @@ This dual-role capability enables powerful patterns like:
 ### Example Scenario:
 
 A "Research Agent" could:
+
 1. **Server Role**: Receive research requests from user-facing agents
 2. **Client Role**: Delegate specific tasks to specialized agents (e.g., Web Search Agent, Data Analysis Agent)
 3. **Server Role Again**: Compile results and return them to the original requester
@@ -47,99 +52,38 @@ For more detailed implementation examples and patterns, you should refer to the 
 
 Based on the A2A protocol architecture and best practices for Python projects, here's a recommended directory structure for an A2A-compliant agent that can act as both client and server:
 
-```
-a2a-agent-example/
-├── pyproject.toml              # uv project configuration
-├── uv.lock                     # uv lock file
-├── .env.example                # Environment variables template
-├── .gitignore
-├── README.md
-│
-├── src/
-│   └── agent_name/             # Replace with your agent name
-│       ├── __init__.py
-│       │
-│       ├── core/               # Core agent logic
-│       │   ├── __init__.py
-│       │   ├── agent.py        # LangGraph agent implementation
-│       │   ├── state.py        # Agent state definitions
-│       │   ├── tools.py        # Agent tools/functions
-│       │   └── prompts.py      # System prompts
-│       │
-│       ├── server/             # A2A Server implementation
-│       │   ├── __init__.py
-│       │   ├── app.py          # FastAPI/Starlette app
-│       │   ├── routes.py       # A2A protocol endpoints
-│       │   ├── executor.py     # Task executor (LangGraph adapter)
-│       │   ├── models.py       # Pydantic models for A2A
-│       │   └── agent_card.py   # Agent card generator
-│       │
-│       ├── client/             # A2A Client implementation
-│       │   ├── __init__.py
-│       │   ├── client.py       # A2A client class
-│       │   ├── discovery.py    # Agent discovery utilities
-│       │   ├── auth.py         # Authentication handlers
-│       │   └── models.py       # Client-side models
-│       │
-│       ├── common/             # Shared utilities
-│       │   ├── __init__.py
-│       │   ├── config.py       # Configuration management
-│       │   ├── logging.py      # Logging setup
-│       │   ├── exceptions.py   # Custom exceptions
-│       │   └── utils.py        # Helper functions
-│       │
-│       └── main.py             # Entry point for the agent
-│
-├── static/                     # Static files for agent card
-│   └── .well-known/
-│       └── agent.json          # Generated agent card
-│
-├── tests/
-│   ├── __init__.py
-│   ├── test_agent.py
-│   ├── test_server.py
-│   ├── test_client.py
-│   └── fixtures/
-│       └── sample_tasks.json
-│
-├── examples/                   # Usage examples
-│   ├── client_example.py       # How to use as client
-│   ├── server_example.py       # How to run as server
-│   └── combined_example.py     # Both roles example
-│
-├── docker/                     # Docker configurations
-│   ├── Dockerfile
-│   └── docker-compose.yml
-│
-└── docs/                       # Documentation
-    ├── architecture.md
-    ├── api.md
-    └── deployment.md
-```
+[Practical A2A LangGraph Agent Project Structure](./practical-a2a-langgraph-agent-project-structure.md)
 
 ### Key Components Explained:
 
 #### 1. **Core Agent Logic (`src/agent_name/core/`)**
+
 This contains your LangGraph agent implementation, independent of A2A protocol concerns:
+
 - `agent.py`: Your LangGraph graph definition and logic
 - `state.py`: State schemas for your agent
 - `tools.py`: Any tools/functions your agent uses
 - `prompts.py`: System prompts and templates
 
 #### 2. **Server Components (`src/agent_name/server/`)**
+
 Implements the A2A server protocol:
+
 - `app.py`: FastAPI/Starlette application setup
 - `routes.py`: A2A endpoints (`/tasks/send`, `/tasks/sendSubscribe`, etc.)
 - `executor.py`: Adapts LangGraph execution to A2A task lifecycle
 - `agent_card.py`: Generates the agent card for discovery
 
 #### 3. **Client Components (`src/agent_name/client/`)**
+
 Implements A2A client capabilities:
+
 - `client.py`: Main client class for interacting with other A2A agents
 - `discovery.py`: Methods to discover and fetch agent cards
 - `auth.py`: Handles various authentication schemes
 
 #### 4. **Unified Entry Point (`src/agent_name/main.py`)**
+
 Example structure:
 
 ```python
@@ -153,11 +97,11 @@ class UnifiedAgent:
         self.agent = create_agent()
         self.client = A2AClient()
         self.server = create_server(self.agent)
-    
+
     async def run_as_server(self, host="0.0.0.0", port=8000):
         """Run the agent as an A2A server"""
         await self.server.serve(host, port)
-    
+
     async def delegate_task(self, remote_agent_url, task):
         """Act as a client to delegate tasks"""
         return await self.client.send_task(remote_agent_url, task)
@@ -172,6 +116,7 @@ class UnifiedAgent:
 3. **Async Throughout**: Use async/await patterns consistently for non-blocking operations
 
 4. **Environment-Based Role Selection**: Use environment variables to configure which role(s) to activate:
+
    ```python
    # .env
    ENABLE_SERVER=true
@@ -182,6 +127,7 @@ class UnifiedAgent:
 5. **Dependency Injection**: Pass the core agent instance to both server and client components to enable task delegation during server processing
 
 This structure allows you to:
+
 - Run the agent as a pure server
 - Run it as a pure client
 - Run both roles simultaneously
