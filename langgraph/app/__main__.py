@@ -60,28 +60,18 @@ def main(host, port):
         host (str): 서버 호스트 주소 (기본값: 'localhost')
         port (int): 서버 포트 번호 (기본값: 10000)
     """
+    model_source = os.getenv('TOOL)MODEL_SRC', 'openai')
     try:
         # LLM(Large Language Model) 소스 확인 및 필수 환경 변수 검증
         # model_source가 설정되지 않았으면 기본값으로 'google' 사용
-        if os.getenv('model_source', 'google') == 'google':
-            # Google AI (Gemini) 사용 시 GOOGLE_API_KEY가 필수
-            if not os.getenv('GOOGLE_API_KEY'):
+        if model_source == 'openai':
+            if not os.getenv('TOOL_API_KEY'):
                 raise MissingAPIKeyError(
-                    'GOOGLE_API_KEY environment variable not set.'
+                    'TOOL_API_KEY for "{model_source}" model environment variable not set.'
                 )
-        else:
-            # 커스텀 LLM 서버 사용 시 필요한 환경 변수들
-            # TOOL_LLM_URL: LLM 서버의 엔드포인트 URL
-            if not os.getenv('TOOL_LLM_URL'):
-                raise MissingAPIKeyError(
-                    'TOOL_LLM_URL environment variable not set.'
-                )
-            # TOOL_LLM_NAME: 사용할 LLM 모델의 이름
-            if not os.getenv('TOOL_LLM_NAME'):
-                raise MissingAPIKeyError(
-                    'TOOL_LLM_NAME environment not variable not set.'
-                )
+            os.environ["OPENAI_API_KEY"] = os.getenv("TOOL_API_KEY")
 
+        
         # 에이전트가 지원하는 기능들을 정의합니다
         # streaming: 실시간 스트리밍 응답 지원 (응답이 생성되는 대로 전송)
         # pushNotifications: 클라이언트에게 능동적으로 알림을 보낼 수 있음

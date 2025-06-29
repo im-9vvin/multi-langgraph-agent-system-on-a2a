@@ -12,7 +12,7 @@ import httpx  # 비동기 HTTP 클라이언트 - 외부 API 호출에 사용됩�
 from langchain_core.messages import AIMessage, ToolMessage  # LangChain 메시지 타입들
 from langchain_core.tools import tool  # 함수를 LangChain 도구로 변환하는 데코레이터
 from langchain_google_genai import ChatGoogleGenerativeAI  # Google AI (Gemini) 통합
-from langchain_openai import ChatOpenAI  # OpenAI API 호환 모델 통합
+from langchain_openai import ChatOpenAI # OpenAI API 호환 모델 통합
 from langgraph.checkpoint.memory import MemorySaver  # 대화 상태를 메모리에 저장하는 체크포인터
 from langgraph.prebuilt import create_react_agent  # ReAct 패턴의 에이전트를 생성하는 헬퍼 함수
 from pydantic import BaseModel  # 데이터 검증과 스키마 정의를 위한 라이브러리
@@ -122,20 +122,13 @@ class CurrencyAgent:
         환경 변수를 기반으로 적절한 LLM을 선택하고,
         도구와 함께 ReAct 에이전트 그래프를 생성합니다.
         """
-        # LLM 소스 확인 - 기본값은 'google'
-        model_source = os.getenv('model_source', 'google')
+        # LLM 소스 확인 - 기본값은 'openai'
+        model_source = os.getenv('TOOL_MODEL_SRC', 'openai')
         
-        if model_source == 'google':
-            # Google AI (Gemini) 모델 사용
-            # gemini-2.0-flash는 빠른 응답을 위한 경량 모델입니다
-            self.model = ChatGoogleGenerativeAI(model='gemini-2.0-flash')
-        else:
-            # 커스텀 OpenAI 호환 서버 사용 (예: local LLM, Azure OpenAI 등)
+        if model_source == 'openai':
             self.model = ChatOpenAI(
-                model=os.getenv('TOOL_LLM_NAME'),  # 모델 이름
-                openai_api_key=os.getenv('API_KEY', 'EMPTY'),  # API 키 (로컬 서버의 경우 더미값)
-                openai_api_base=os.getenv('TOOL_LLM_URL'),  # API 엔드포인트 URL
-                temperature=0,  # 온도 0은 더 일관된 응답을 생성합니다
+                model=os.getenv('TOOL_MODEL_NAME', 'gpt-4o-mini'),
+                temperature=os.getenv('TOOL_MODEL_TEMPEATURE', 0)
             )
         
         # 에이전트가 사용할 도구 목록
@@ -172,7 +165,7 @@ class CurrencyAgent:
 
         # 에이전트 그래프를 스트리밍 모드로 실행
         # stream_mode='values'는 각 단계의 전체 상태를 반환합니다
-        for item in self.graph.stream(inputs, config, stream_mode='values'):
+        async for item in self.graph.astream(inputs, config, stream_mode='values'):
             # 가장 최근 메시지를 가져옵니다
             message = item['messages'][-1]
             
@@ -198,9 +191,9 @@ class CurrencyAgent:
                 }
 
         # 모든 처리가 완료된 후 최종 응답 생성
-        yield self.get_agent_response(config)
+        yield await self.get_agent_response(config)
 
-    def get_agent_response(self, config):
+    async def get_agent_response(self, config):
         """
         에이전트의 최종 응답을 구성하는 메서드
         
@@ -214,7 +207,7 @@ class CurrencyAgent:
             상태와 내용을 포함한 응답 딕셔너리
         """
         # 현재 그래프 상태를 가져옵니다
-        current_state = self.graph.get_state(config)
+        current_state = await self.graph.aget_state(config)
         # 구조화된 응답 객체를 추출합니다
         structured_response = current_state.values.get('structured_response')
         
