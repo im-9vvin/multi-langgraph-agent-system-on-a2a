@@ -35,3 +35,6 @@ class OrchestratorState(MessagesState):
     
     # Error information
     error: Optional[str]
+    
+    # Context ID for conversation tracking
+    context_id: Optional[str]

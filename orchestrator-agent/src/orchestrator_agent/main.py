@@ -10,6 +10,7 @@ import uvicorn
 from .common.config import config
 from .common.logging import setup_logging
 from .server.a2a_app import create_app
+from starlette.middleware.cors import CORSMiddleware
 
 
 logger = logging.getLogger(__name__)
@@ -47,8 +48,18 @@ def main(host: str, port: int, log_level: str) -> None:
         logger.info(f"Starting Orchestrator Agent server on {host}:{port}")
         server = create_app(host, port)
         
+        # Build the Starlette app and add CORS middleware
+        app = server.build()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # Allow all origins for testing
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        
         # Run the server
-        uvicorn.run(server.build(), host=host, port=port)
+        uvicorn.run(app, host=host, port=port)
         
     except Exception as e:
         logger.error(f'An error occurred during server startup: {e}')

@@ -52,13 +52,28 @@ The test_client.py demonstrates various orchestration scenarios:
 - Result aggregation
 - Error handling
 
+## Implemented Features (v0.4.1)
+
+1. **Checkpointing System**: SQLite-based persistent state storage
+   - Saves conversation history across sessions
+   - Supports checkpoint export and cleanup
+   - Integrated with LangGraph for automatic state persistence
+
+2. **Streaming Support**: Real-time SSE updates
+   - Progress events for orchestration phases
+   - Event history and subscription management
+   - SSE endpoints for client integration
+
+3. **Full A2A Protocol**: Complete protocol implementation
+   - Task lifecycle management
+   - Progress and status updates
+   - Protocol message handling
+
 ## Future Enhancements
 
-1. **Streaming Support**: Add SSE streaming for real-time updates
-2. **Checkpointing**: Add state persistence for long-running orchestrations
-3. **Dynamic Discovery**: Auto-discover available agents
-4. **Advanced Routing**: ML-based routing decisions
-5. **Load Balancing**: Distribute tasks across multiple instances of same agent type
+1. **Dynamic Discovery**: Auto-discover available agents
+2. **Advanced Routing**: ML-based routing decisions
+3. **Load Balancing**: Distribute tasks across multiple instances of same agent type
 
 ## Integration Points
 

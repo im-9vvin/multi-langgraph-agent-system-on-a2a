@@ -52,6 +52,8 @@ async def plan_orchestration(state: OrchestratorState) -> OrchestratorState:
     """Plan how to orchestrate the user's request."""
     logger.info("Planning orchestration")
     
+    # Status update will be sent by astream_events in orchestrator
+    
     # Get the latest user message
     user_message = None
     for msg in reversed(state["messages"]):
@@ -64,19 +66,33 @@ async def plan_orchestration(state: OrchestratorState) -> OrchestratorState:
         state["phase"] = "complete"
         return state
     
+    # Build conversation history
+    conversation_history = ""
+    if len(state["messages"]) > 1:
+        conversation_history = "이전 대화 내용:\n"
+        for msg in state["messages"][:-1]:  # Exclude the current message
+            if isinstance(msg, HumanMessage):
+                conversation_history += f"사용자: {msg.content}\n"
+            elif isinstance(msg, AIMessage):
+                conversation_history += f"AI: {msg.content}\n"
+        conversation_history = conversation_history.strip()
+    
     # Always route to agents - no direct handling
     
     # Get agent information for context
     agents_info = """
-- Currency Agent: Handles currency exchange rates and conversions
-- Time Agent: Handles time-related queries and general questions
-- Hotel Agent: Handles hotel search, booking, and recommendations
+- Currency Agent: 실시간 환율 조회 및 환전 계산 (USD, EUR, JPY, KRW 등)
+- Time Agent: 현재 시간 확인, 세계 시간 조회
+- Hotel Agent: 호텔 검색, 추천 및 예약 정보
 """
     
     # Create orchestration plan
     llm = get_llm()
     system_prompt = ORCHESTRATOR_SYSTEM_PROMPT.format(agents=agents_info)
-    prompt = PLANNING_PROMPT.format(user_request=user_message)
+    prompt = PLANNING_PROMPT.format(
+        user_request=user_message,
+        conversation_history=conversation_history if conversation_history else "이전 대화 없음"
+    )
     
     # Get plan from LLM
     response = await llm.ainvoke([
@@ -95,6 +111,8 @@ async def route_to_agents(state: OrchestratorState) -> OrchestratorState:
     """Determine which agents should handle which tasks."""
     logger.info("Routing to agents")
     
+    # Status update will be sent by astream_events in orchestrator
+    
     llm = get_llm()
     
     # Get original user request
@@ -104,8 +122,23 @@ async def route_to_agents(state: OrchestratorState) -> OrchestratorState:
             user_request = msg.content
             break
     
+    # Build conversation history
+    conversation_history = ""
+    if len(state["messages"]) > 1:
+        conversation_history = "이전 대화 내용:\n"
+        for msg in state["messages"][:-1]:  # Exclude the current message
+            if isinstance(msg, HumanMessage):
+                conversation_history += f"사용자: {msg.content}\n"
+            elif isinstance(msg, AIMessage):
+                conversation_history += f"AI: {msg.content}\n"
+        conversation_history = conversation_history.strip()
+    
     # Get routing decisions
-    prompt = ROUTING_PROMPT.format(plan=state["plan"], user_request=user_request)
+    prompt = ROUTING_PROMPT.format(
+        plan=state["plan"], 
+        user_request=user_request,
+        conversation_history=conversation_history if conversation_history else "이전 대화 없음"
+    )
     
     response = await llm.ainvoke([
         SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
@@ -170,9 +203,14 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
     """Execute tasks on remote agents."""
     logger.info("Executing remote calls")
     
+    # Status update will be sent by astream_events in orchestrator
+    
     routing = state.get("routing_decision", {})
     logger.info(f"Routing decision: {routing}")
     tasks = routing.get("tasks", [])
+    
+    # Get context_id from state
+    context_id = state.get("context_id", "default-context")
     
     if not tasks:
         logger.info("No tasks to execute - likely a help/capability request")
@@ -187,14 +225,51 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
     import asyncio
     
     # Create async task execution function
-    async def execute_single_task(task, config):
+    async def execute_single_task(task, config, context_id):
         """Execute a single task and return the result."""
         agent_url = task.get("agent_url", config.agent_1_url)
         message = task.get("message", "")
         
+        # Include conversation context in the message if needed
+        if len(state["messages"]) > 1 and "이전" in message.lower():
+            # Add context about previous messages
+            context_info = "\n\n[대화 맥락]:\n"
+            for msg in state["messages"][:-1]:
+                if isinstance(msg, HumanMessage):
+                    context_info += f"사용자: {msg.content}\n"
+                elif isinstance(msg, AIMessage):
+                    # Extract key info from AI response
+                    content = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
+                    context_info += f"이전 응답: {content}\n"
+            message = message + context_info
+        
         try:
+            # Send specific update about what we're querying
+            if state.get("task_updater"):
+                try:
+                    from a2a.types import Part, TextPart, TaskState
+                    agent_name = "에이전트"
+                    if "10000" in agent_url:
+                        agent_name = "환율 에이전트"
+                    elif "10001" in agent_url:
+                        agent_name = "시간 에이전트"
+                    elif "run.app" in agent_url:
+                        agent_name = "호텔 에이전트"
+                    
+                    # Extract key info from message
+                    query_info = message[:50] + "..." if len(message) > 50 else message
+                    await state["task_updater"].update_status(
+                        TaskState.working,
+                        message=state["task_updater"].new_agent_message(
+                            [Part(root=TextPart(text=f"🔄 {agent_name}로부터 '{query_info}'에 대한 정보를 가져오고 있습니다..."))],
+                            metadata={"type": "progress", "phase": "calling_agent", "agent": agent_name}
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send task update: {e}")
+            
             # Direct A2A call without using tools
-            logger.info(f"Sending task to {agent_url}: {message}")
+            logger.info(f"Sending task to {agent_url}: {message} with context_id: {context_id}")
             
             # Create A2A message
             a2a_message = {
@@ -202,10 +277,10 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
                 "method": "message/send",
                 "params": {
                     "message": {
-                        "messageId": f"orch-{hash(message) % 10000}",
+                        "messageId": f"orch-{context_id}-{hash(message) % 10000}",
                         "role": "user",
                         "parts": [{"text": message}],
-                        "contextId": "orchestration"
+                        "contextId": context_id
                     }
                 },
                 "id": 1
@@ -304,14 +379,14 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
             parallel_tasks.append(task)
         else:
             # Execute non-parallel tasks immediately and wait
-            result = await execute_single_task(task, config)
+            result = await execute_single_task(task, config, context_id)
             remote_calls.append(result)
     
     # Execute parallel tasks concurrently
     if parallel_tasks:
         logger.info(f"Executing {len(parallel_tasks)} tasks in parallel")
         results = await asyncio.gather(
-            *[execute_single_task(task, config) for task in parallel_tasks],
+            *[execute_single_task(task, config, context_id) for task in parallel_tasks],
             return_exceptions=False
         )
         remote_calls.extend(results)
@@ -325,6 +400,8 @@ async def execute_remote_calls(state: OrchestratorState) -> OrchestratorState:
 async def aggregate_results(state: OrchestratorState) -> OrchestratorState:
     """Aggregate results from multiple agents."""
     logger.info("Aggregating results")
+    
+    # Status update will be sent by astream_events in orchestrator
     
     llm = get_llm()
     
@@ -344,11 +421,19 @@ async def aggregate_results(state: OrchestratorState) -> OrchestratorState:
         else:
             results[agent_name] = f"Failed: {call['error']}"
     
+    # Get agent information for aggregation context
+    agents_info = """
+- Currency Agent: 실시간 환율 조회 및 환전 계산 (USD, EUR, JPY, KRW 등)
+- Time Agent: 현재 시간 확인, 세계 시간 조회
+- Hotel Agent: 호텔 검색, 추천 및 예약 정보
+"""
+    
     # Create aggregation prompt
     prompt = AGGREGATION_PROMPT.format(
         user_request=user_message,
         plan=state.get("plan", ""),
-        results=json.dumps(results, indent=2)
+        results=json.dumps(results, indent=2),
+        agents=agents_info
     )
     
     # Get aggregated response
@@ -380,9 +465,13 @@ def should_continue(state: OrchestratorState) -> Literal["plan", "route", "execu
         return "end"
 
 
-def create_orchestrator_agent():
-    """Create the orchestrator agent graph."""
-    # Create the graph
+def create_orchestrator_agent(checkpointer=None):
+    """Create the orchestrator agent graph.
+    
+    Args:
+        checkpointer: Optional checkpoint saver for state persistence
+    """
+    # Create the graph with custom state serialization
     workflow = StateGraph(OrchestratorState)
     
     # Add nodes
@@ -424,8 +513,9 @@ def create_orchestrator_agent():
     # Set entry point
     workflow.set_entry_point("plan")
     
-    # Create checkpointer
-    checkpointer = MemorySaver()
+    # Use provided checkpointer or default to MemorySaver
+    if not checkpointer:
+        checkpointer = MemorySaver()
     
     # Compile the graph
     return workflow.compile(checkpointer=checkpointer)

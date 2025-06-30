@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "messageId": "test-005",
+      "role": "user",
+      "parts": [{"text": "Hello my name is John"}],
+      "contextId": "checkpoint-test"
+    }
+  },
+  "id": 1
+}

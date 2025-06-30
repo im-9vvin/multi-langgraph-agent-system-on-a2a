@@ -8,6 +8,8 @@ from a2a.server.tasks import InMemoryPushNotifier, InMemoryTaskStore
 
 from ..adapters import OrchestratorExecutor
 from .models import create_agent_card
+from .streaming_endpoints import add_streaming_endpoints
+from .streaming_handler import StreamingRequestHandler
 
 
 logger = logging.getLogger(__name__)
@@ -30,14 +32,14 @@ def create_app(host: str = 'localhost', port: int = 10002) -> A2AStarletteApplic
     # Create executor
     executor = OrchestratorExecutor()
     
-    # Create request handler with required components
-    request_handler = DefaultRequestHandler(
+    # Create streaming request handler
+    request_handler = StreamingRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
         push_notifier=InMemoryPushNotifier(httpx_client),
     )
     
-    # Create agent card
+    # Create agent card with streaming capability
     agent_card = create_agent_card(host, port)
     
     # Create A2A application
@@ -45,6 +47,9 @@ def create_app(host: str = 'localhost', port: int = 10002) -> A2AStarletteApplic
         agent_card=agent_card,
         http_handler=request_handler
     )
+    
+    # TODO: Add streaming endpoints after A2A SDK supports custom routes
+    # add_streaming_endpoints(app, executor)
     
     logger.info(f"Created A2A orchestrator server on {host}:{port}")
     
