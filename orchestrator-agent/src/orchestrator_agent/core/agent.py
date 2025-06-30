@@ -70,6 +70,7 @@ async def plan_orchestration(state: OrchestratorState) -> OrchestratorState:
     agents_info = """
 - Currency Agent: Handles currency exchange rates and conversions
 - Time Agent: Handles time-related queries and general questions
+- Hotel Agent: Handles hotel search, booking, and recommendations
 """
     
     # Create orchestration plan
@@ -143,8 +144,10 @@ async def route_to_agents(state: OrchestratorState) -> OrchestratorState:
                 break
         
         # Fallback: simple routing based on keywords
-        if "환율" in user_msg or "달러" in user_msg:
+        if "환율" in user_msg or "달러" in user_msg or "currency" in user_msg.lower():
             agent_url = config.agent_1_url
+        elif "호텔" in user_msg or "숙박" in user_msg or "hotel" in user_msg.lower():
+            agent_url = config.agent_3_url
         else:
             agent_url = config.agent_2_url
             
